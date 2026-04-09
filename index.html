@@ -507,7 +507,7 @@
 
         // Central API helper — all reads/writes go through Apps Script
         const sheetsAPI = async (action, sheet, data = null) => {
-            if (!SCRIPT_URL || SCRIPT_URL === 'APPS_SCRIPT_URL')
+            if (!SCRIPT_URL || SCRIPT_URL === 'YOUR_SCRIPT_URL_HERE')
                 throw new Error('Script URL not configured. Open bushwalk.html and set SCRIPT_URL at the top of the script.');
             const url = new URL(SCRIPT_URL);
             url.searchParams.set('action', action);
@@ -1564,29 +1564,62 @@
             );
         };
 
+        // Self-contained editable cell — each cell owns its own state, no shared refs
+        const EditableCell = ({ value, onSave, canEdit }) => {
+            const [editing, setEditing] = useState(false);
+            const [localVal, setLocalVal] = useState(String(value));
+            const inputRef = useRef(null);
+
+            useEffect(() => {
+                if (editing && inputRef.current) {
+                    inputRef.current.focus();
+                    inputRef.current.select();
+                }
+            }, [editing]);
+
+            const commit = () => {
+                onSave(parseFloat(localVal) || 0);
+                setEditing(false);
+            };
+
+            if (!canEdit) return <span>₹{Number(value).toLocaleString()}</span>;
+
+            if (editing) {
+                return (
+                    <input
+                        ref={inputRef}
+                        type="number"
+                        value={localVal}
+                        onChange={(e) => setLocalVal(e.target.value)}
+                        onBlur={commit}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') { commit(); }
+                            if (e.key === 'Escape') { setEditing(false); }
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        style={{ width: '100%', padding: '4px 6px', border: '2px solid #2C5F2D', borderRadius: '4px', fontSize: '14px' }}
+                    />
+                );
+            }
+
+            return (
+                <span
+                    onClick={() => { setLocalVal(String(value)); setEditing(true); }}
+                    title="Click to edit"
+                    style={{ cursor: 'pointer', display: 'block', width: '100%', padding: '2px 0' }}
+                >
+                    ₹{Number(value).toLocaleString()}
+                </span>
+            );
+        };
+
         const ExpenditureTab = ({
             opexCategories, capexCategories, opexData, capexData, opexBudget, capexBudget, yearlyBudget, setYearlyBudget,
             newOpexCategory, setNewOpexCategory, newCapexCategory, setNewCapexCategory,
             addOpexCategory, addCapexCategory, updateExpense, calculateTotals, calculateTotalBudget, updateBudget, userRole, currentUser
         }) => {
             const [expenseTab, setExpenseTab] = useState('summary');
-            const [editingCell, setEditingCell] = useState({ month: '', category: '', type: '' });
-            const [editingBudgetCell, setEditingBudgetCell] = useState({ category: '', type: '' });
-
-            const budgetInputRef = useRef(null);
-            const cellInputRef = useRef(null);
-
-            useEffect(() => {
-                if (editingBudgetCell.category) {
-                    setTimeout(() => { if (budgetInputRef.current) { budgetInputRef.current.focus(); budgetInputRef.current.select(); } }, 0);
-                }
-            }, [editingBudgetCell.category, editingBudgetCell.type]);
-
-            useEffect(() => {
-                if (editingCell.category) {
-                    setTimeout(() => { if (cellInputRef.current) { cellInputRef.current.focus(); cellInputRef.current.select(); } }, 0);
-                }
-            }, [editingCell.month, editingCell.category, editingCell.type]);
 
             const months = ['Apr-2025', 'May-2025', 'Jun-2025', 'Jul-2025', 'Aug-2025', 'Sep-2025',
                 'Oct-2025', 'Nov-2025', 'Dec-2025', 'Jan-2026', 'Feb-2026', 'Mar-2026'];
@@ -1601,16 +1634,6 @@
 
             const calculateMonthTotal = (monthData) => {
                 return Object.values(monthData || {}).reduce((sum, val) => sum + val, 0);
-            };
-
-            const handleCellEdit = (month, category, type, value) => {
-                updateExpense(month, category, type, parseFloat(value) || 0);
-                setEditingCell({ month: '', category: '', type: '' });
-            };
-
-            const handleBudgetEdit = (category, type, value) => {
-                updateBudget(category, type, parseFloat(value) || 0);
-                setEditingBudgetCell({ category: '', type: '' });
             };
 
             const { opexTotal, capexTotal } = calculateTotals();
@@ -1707,7 +1730,13 @@
                         <>
                             <h3 className="section-title">Budgeted Expenditure - FY 2025-26</h3>
 
-                            <h4 style={{ fontSize: '18px', fontWeight: '600', color: '#2C5F2D', marginTop: '30px', marginBottom: '15px' }}>
+                            {canEdit && (
+                                <div className="alert alert-info" style={{ marginBottom: '20px' }}>
+                                    <strong>Tip:</strong> Click on any budget amount to edit it. Press Enter or click away to save.
+                                </div>
+                            )}
+
+                            <h4 style={{ fontSize: '18px', fontWeight: '600', color: '#2C5F2D', marginTop: '10px', marginBottom: '15px' }}>
                                 Operational Expenditure Budget
                             </h4>
                             <div className="table-container">
@@ -1719,36 +1748,18 @@
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {opexCategories.map(category => {
-                                            const isEditing = editingBudgetCell.category === category && editingBudgetCell.type === 'opex';
-                                            const value = opexBudget[category] || 0;
-
-                                            return (
-                                                <tr key={category}>
-                                                    <td><strong>{category}</strong></td>
-                                                    <td
-                                                        onDoubleClick={(e) => { e.preventDefault(); if (canEdit) setEditingBudgetCell({ category, type: 'opex' }); }}
-                                                        style={{ cursor: canEdit ? 'pointer' : 'default', userSelect: 'none' }}>
-                                                        {isEditing && canEdit ? (
-                                                            <input
-                                                                ref={budgetInputRef}
-                                                                type="number"
-                                                                defaultValue={value}
-                                                                onMouseDown={(e) => e.stopPropagation()}
-                                                                onBlur={(e) => handleBudgetEdit(category, 'opex', e.target.value)}
-                                                                onKeyDown={(e) => {
-                                                                    if (e.key === 'Enter') handleBudgetEdit(category, 'opex', e.target.value);
-                                                                    if (e.key === 'Escape') setEditingBudgetCell({ category: '', type: '' });
-                                                                }}
-                                                                style={{ width: '100%', padding: '4px' }}
-                                                            />
-                                                        ) : (
-                                                            `₹${value.toLocaleString()}`
-                                                        )}
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
+                                        {opexCategories.map(category => (
+                                            <tr key={category}>
+                                                <td><strong>{category}</strong></td>
+                                                <td>
+                                                    <EditableCell
+                                                        value={opexBudget[category] || 0}
+                                                        canEdit={canEdit}
+                                                        onSave={(val) => updateBudget(category, 'opex', val)}
+                                                    />
+                                                </td>
+                                            </tr>
+                                        ))}
                                         <tr style={{ background: '#e2e8f0', fontWeight: 'bold' }}>
                                             <td>Total OPEX Budget</td>
                                             <td>₹{opexBudgetTotal.toLocaleString()}</td>
@@ -1769,36 +1780,18 @@
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {capexCategories.map(category => {
-                                            const isEditing = editingBudgetCell.category === category && editingBudgetCell.type === 'capex';
-                                            const value = capexBudget[category] || 0;
-
-                                            return (
-                                                <tr key={category}>
-                                                    <td><strong>{category}</strong></td>
-                                                    <td
-                                                        onDoubleClick={(e) => { e.preventDefault(); if (canEdit) setEditingBudgetCell({ category, type: 'capex' }); }}
-                                                        style={{ cursor: canEdit ? 'pointer' : 'default', userSelect: 'none' }}>
-                                                        {isEditing && canEdit ? (
-                                                            <input
-                                                                ref={budgetInputRef}
-                                                                type="number"
-                                                                defaultValue={value}
-                                                                onMouseDown={(e) => e.stopPropagation()}
-                                                                onBlur={(e) => handleBudgetEdit(category, 'capex', e.target.value)}
-                                                                onKeyDown={(e) => {
-                                                                    if (e.key === 'Enter') handleBudgetEdit(category, 'capex', e.target.value);
-                                                                    if (e.key === 'Escape') setEditingBudgetCell({ category: '', type: '' });
-                                                                }}
-                                                                style={{ width: '100%', padding: '4px' }}
-                                                            />
-                                                        ) : (
-                                                            `₹${value.toLocaleString()}`
-                                                        )}
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
+                                        {capexCategories.map(category => (
+                                            <tr key={category}>
+                                                <td><strong>{category}</strong></td>
+                                                <td>
+                                                    <EditableCell
+                                                        value={capexBudget[category] || 0}
+                                                        canEdit={canEdit}
+                                                        onSave={(val) => updateBudget(category, 'capex', val)}
+                                                    />
+                                                </td>
+                                            </tr>
+                                        ))}
                                         <tr style={{ background: '#e2e8f0', fontWeight: 'bold' }}>
                                             <td>Total CAPEX Budget</td>
                                             <td>₹{capexBudgetTotal.toLocaleString()}</td>
@@ -1813,12 +1806,6 @@
                                     <div className="stat-value">₹{(opexBudgetTotal + capexBudgetTotal).toLocaleString()}</div>
                                 </div>
                             </div>
-
-                            {canEdit && (
-                                <div className="alert alert-info" style={{ marginTop: '20px' }}>
-                                    <strong>Tip:</strong> Double-click on any budget amount to edit it
-                                </div>
-                            )}
                         </>
                     )}
 
@@ -1841,6 +1828,12 @@
                                 </div>
                             )}
 
+                            {canEdit && (
+                                <div className="alert alert-info" style={{ marginBottom: '16px' }}>
+                                    <strong>Tip:</strong> Click on any cell to edit the amount. Press Enter or click away to save.
+                                </div>
+                            )}
+
                             <div className="table-container" style={{ overflowX: 'auto' }}>
                                 <table>
                                     <thead>
@@ -1854,33 +1847,15 @@
                                         {opexCategories.map(category => (
                                             <tr key={category}>
                                                 <td><strong>{category}</strong></td>
-                                                {months.map(month => {
-                                                    const value = opexData[month]?.[category] || 0;
-                                                    const isEditing = editingCell.month === month && editingCell.category === category && editingCell.type === 'opex';
-
-                                                    return (
-                                                        <td key={month}
-                                                            onDoubleClick={(e) => { e.preventDefault(); if (canEdit) setEditingCell({ month, category, type: 'opex' }); }}
-                                                            style={{ cursor: canEdit ? 'pointer' : 'default', userSelect: 'none' }}>
-                                                            {isEditing && canEdit ? (
-                                                                <input
-                                                                    ref={cellInputRef}
-                                                                    type="number"
-                                                                    defaultValue={value}
-                                                                    onMouseDown={(e) => e.stopPropagation()}
-                                                                    onBlur={(e) => handleCellEdit(month, category, 'opex', e.target.value)}
-                                                                    onKeyDown={(e) => {
-                                                                        if (e.key === 'Enter') handleCellEdit(month, category, 'opex', e.target.value);
-                                                                        if (e.key === 'Escape') setEditingCell({ month: '', category: '', type: '' });
-                                                                    }}
-                                                                    style={{ width: '100%', padding: '4px' }}
-                                                                />
-                                                            ) : (
-                                                                `₹${value.toLocaleString()}`
-                                                            )}
-                                                        </td>
-                                                    );
-                                                })}
+                                                {months.map(month => (
+                                                    <td key={month}>
+                                                        <EditableCell
+                                                            value={opexData[month]?.[category] || 0}
+                                                            canEdit={canEdit}
+                                                            onSave={(val) => updateExpense(month, category, 'opex', val)}
+                                                        />
+                                                    </td>
+                                                ))}
                                                 <td style={{ background: '#f7fafc', fontWeight: 'bold' }}>
                                                     ₹{opexYTD[category]?.toLocaleString() || 0}
                                                 </td>
@@ -1896,11 +1871,6 @@
                                     </tbody>
                                 </table>
                             </div>
-                            {canEdit && (
-                                <div className="alert alert-info" style={{ marginTop: '20px' }}>
-                                    <strong>Tip:</strong> Double-click on any cell to edit the amount
-                                </div>
-                            )}
                         </>
                     )}
 
@@ -1923,6 +1893,12 @@
                                 </div>
                             )}
 
+                            {canEdit && (
+                                <div className="alert alert-info" style={{ marginBottom: '16px' }}>
+                                    <strong>Tip:</strong> Click on any cell to edit the amount. Press Enter or click away to save.
+                                </div>
+                            )}
+
                             <div className="table-container" style={{ overflowX: 'auto' }}>
                                 <table>
                                     <thead>
@@ -1936,33 +1912,15 @@
                                         {capexCategories.map(category => (
                                             <tr key={category}>
                                                 <td><strong>{category}</strong></td>
-                                                {months.map(month => {
-                                                    const value = capexData[month]?.[category] || 0;
-                                                    const isEditing = editingCell.month === month && editingCell.category === category && editingCell.type === 'capex';
-
-                                                    return (
-                                                        <td key={month}
-                                                            onDoubleClick={(e) => { e.preventDefault(); if (canEdit) setEditingCell({ month, category, type: 'capex' }); }}
-                                                            style={{ cursor: canEdit ? 'pointer' : 'default', userSelect: 'none' }}>
-                                                            {isEditing && canEdit ? (
-                                                                <input
-                                                                    ref={cellInputRef}
-                                                                    type="number"
-                                                                    defaultValue={value}
-                                                                    onMouseDown={(e) => e.stopPropagation()}
-                                                                    onBlur={(e) => handleCellEdit(month, category, 'capex', e.target.value)}
-                                                                    onKeyDown={(e) => {
-                                                                        if (e.key === 'Enter') handleCellEdit(month, category, 'capex', e.target.value);
-                                                                        if (e.key === 'Escape') setEditingCell({ month: '', category: '', type: '' });
-                                                                    }}
-                                                                    style={{ width: '100%', padding: '4px' }}
-                                                                />
-                                                            ) : (
-                                                                `₹${value.toLocaleString()}`
-                                                            )}
-                                                        </td>
-                                                    );
-                                                })}
+                                                {months.map(month => (
+                                                    <td key={month}>
+                                                        <EditableCell
+                                                            value={capexData[month]?.[category] || 0}
+                                                            canEdit={canEdit}
+                                                            onSave={(val) => updateExpense(month, category, 'capex', val)}
+                                                        />
+                                                    </td>
+                                                ))}
                                                 <td style={{ background: '#f7fafc', fontWeight: 'bold' }}>
                                                     ₹{capexYTD[category]?.toLocaleString() || 0}
                                                 </td>
@@ -1978,11 +1936,6 @@
                                     </tbody>
                                 </table>
                             </div>
-                            {canEdit && (
-                                <div className="alert alert-info" style={{ marginTop: '20px' }}>
-                                    <strong>Tip:</strong> Double-click on any cell to edit the amount
-                                </div>
-                            )}
                         </>
                     )}
                 </>
