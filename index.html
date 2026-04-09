@@ -502,7 +502,7 @@
 
         // ─── CONFIGURATION ──────────────────────────────────────────────────────────
         // ↓↓ REPLACE THIS with your deployed Google Apps Script Web App URL ↓↓
-        const SCRIPT_URL = 'APPS_SCRIPT_URL_PLACEHOLDER';
+        const SCRIPT_URL = 'YOUR_SCRIPT_URL_HERE';
         // ↑↑ e.g. 'https://script.google.com/macros/s/AKfycb.../exec'       ↑↑
 
         // Central API helper — all reads/writes go through Apps Script
@@ -513,10 +513,14 @@
             url.searchParams.set('action', action);
             url.searchParams.set('sheet', sheet);
             if (data) {
+                const isUpsert = action === 'upsert' || action === 'upsert_multiple';
+                const body = isUpsert
+                    ? JSON.stringify({ action, sheet, ...data })
+                    : JSON.stringify({ action, sheet, data });
                 await fetch(SCRIPT_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/plain' },
-                    body: JSON.stringify({ action, sheet, data }),
+                    body,
                     mode: 'no-cors'
                 });
                 return { success: true };
@@ -973,19 +977,37 @@
 
             // Expenditure handlers
             const addOpexCategory = () => {
-                if (newOpexCategory && !opexCategories.includes(newOpexCategory)) {
-                    setOpexCategories([...opexCategories, newOpexCategory]);
-                    setNewOpexCategory('');
-                    alert('Operational category added successfully!');
-                }
+                const cat = newOpexCategory.trim();
+                if (!cat) { alert('Please enter a category name.'); return; }
+                if (opexCategories.includes(cat)) { alert('This Operational category already exists.'); return; }
+                withSync(
+                    'Saving OPEX category…',
+                    () => {
+                        setOpexCategories(prev => [...prev, cat]);
+                        setOpexBudget(prev => ({ ...prev, [cat]: 0 }));
+                        setNewOpexCategory('');
+                    },
+                    'upsert', 'OpexBudget',
+                    { matchKeys: { category: cat }, data: { category: cat, amount: 0 } }
+                );
+                alert('Operational category added successfully!');
             };
 
             const addCapexCategory = () => {
-                if (newCapexCategory && !capexCategories.includes(newCapexCategory)) {
-                    setCapexCategories([...capexCategories, newCapexCategory]);
-                    setNewCapexCategory('');
-                    alert('Capital category added successfully!');
-                }
+                const cat = newCapexCategory.trim();
+                if (!cat) { alert('Please enter a category name.'); return; }
+                if (capexCategories.includes(cat)) { alert('This Capital category already exists.'); return; }
+                withSync(
+                    'Saving CAPEX category…',
+                    () => {
+                        setCapexCategories(prev => [...prev, cat]);
+                        setCapexBudget(prev => ({ ...prev, [cat]: 0 }));
+                        setNewCapexCategory('');
+                    },
+                    'upsert', 'CapexBudget',
+                    { matchKeys: { category: cat }, data: { category: cat, amount: 0 } }
+                );
+                alert('Capital category added successfully!');
             };
 
             const updateExpense = (month, category, type, amount) => {
@@ -1551,6 +1573,21 @@
             const [editingCell, setEditingCell] = useState({ month: '', category: '', type: '' });
             const [editingBudgetCell, setEditingBudgetCell] = useState({ category: '', type: '' });
 
+            const budgetInputRef = useRef(null);
+            const cellInputRef = useRef(null);
+
+            useEffect(() => {
+                if (editingBudgetCell.category) {
+                    setTimeout(() => { if (budgetInputRef.current) { budgetInputRef.current.focus(); budgetInputRef.current.select(); } }, 0);
+                }
+            }, [editingBudgetCell.category, editingBudgetCell.type]);
+
+            useEffect(() => {
+                if (editingCell.category) {
+                    setTimeout(() => { if (cellInputRef.current) { cellInputRef.current.focus(); cellInputRef.current.select(); } }, 0);
+                }
+            }, [editingCell.month, editingCell.category, editingCell.type]);
+
             const months = ['Apr-2025', 'May-2025', 'Jun-2025', 'Jul-2025', 'Aug-2025', 'Sep-2025',
                 'Oct-2025', 'Nov-2025', 'Dec-2025', 'Jan-2026', 'Feb-2026', 'Mar-2026'];
 
@@ -1690,18 +1727,18 @@
                                                 <tr key={category}>
                                                     <td><strong>{category}</strong></td>
                                                     <td
-                                                        onDoubleClick={() => canEdit && setEditingBudgetCell({ category, type: 'opex' })}
-                                                        style={{ cursor: canEdit ? 'pointer' : 'default' }}>
+                                                        onDoubleClick={(e) => { e.preventDefault(); if (canEdit) setEditingBudgetCell({ category, type: 'opex' }); }}
+                                                        style={{ cursor: canEdit ? 'pointer' : 'default', userSelect: 'none' }}>
                                                         {isEditing && canEdit ? (
                                                             <input
+                                                                ref={budgetInputRef}
                                                                 type="number"
                                                                 defaultValue={value}
-                                                                autoFocus
+                                                                onMouseDown={(e) => e.stopPropagation()}
                                                                 onBlur={(e) => handleBudgetEdit(category, 'opex', e.target.value)}
-                                                                onKeyPress={(e) => {
-                                                                    if (e.key === 'Enter') {
-                                                                        handleBudgetEdit(category, 'opex', e.target.value);
-                                                                    }
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter') handleBudgetEdit(category, 'opex', e.target.value);
+                                                                    if (e.key === 'Escape') setEditingBudgetCell({ category: '', type: '' });
                                                                 }}
                                                                 style={{ width: '100%', padding: '4px' }}
                                                             />
@@ -1740,18 +1777,18 @@
                                                 <tr key={category}>
                                                     <td><strong>{category}</strong></td>
                                                     <td
-                                                        onDoubleClick={() => canEdit && setEditingBudgetCell({ category, type: 'capex' })}
-                                                        style={{ cursor: canEdit ? 'pointer' : 'default' }}>
+                                                        onDoubleClick={(e) => { e.preventDefault(); if (canEdit) setEditingBudgetCell({ category, type: 'capex' }); }}
+                                                        style={{ cursor: canEdit ? 'pointer' : 'default', userSelect: 'none' }}>
                                                         {isEditing && canEdit ? (
                                                             <input
+                                                                ref={budgetInputRef}
                                                                 type="number"
                                                                 defaultValue={value}
-                                                                autoFocus
+                                                                onMouseDown={(e) => e.stopPropagation()}
                                                                 onBlur={(e) => handleBudgetEdit(category, 'capex', e.target.value)}
-                                                                onKeyPress={(e) => {
-                                                                    if (e.key === 'Enter') {
-                                                                        handleBudgetEdit(category, 'capex', e.target.value);
-                                                                    }
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter') handleBudgetEdit(category, 'capex', e.target.value);
+                                                                    if (e.key === 'Escape') setEditingBudgetCell({ category: '', type: '' });
                                                                 }}
                                                                 style={{ width: '100%', padding: '4px' }}
                                                             />
@@ -1823,18 +1860,18 @@
 
                                                     return (
                                                         <td key={month}
-                                                            onDoubleClick={() => canEdit && setEditingCell({ month, category, type: 'opex' })}
-                                                            style={{ cursor: canEdit ? 'pointer' : 'default' }}>
+                                                            onDoubleClick={(e) => { e.preventDefault(); if (canEdit) setEditingCell({ month, category, type: 'opex' }); }}
+                                                            style={{ cursor: canEdit ? 'pointer' : 'default', userSelect: 'none' }}>
                                                             {isEditing && canEdit ? (
                                                                 <input
+                                                                    ref={cellInputRef}
                                                                     type="number"
                                                                     defaultValue={value}
-                                                                    autoFocus
+                                                                    onMouseDown={(e) => e.stopPropagation()}
                                                                     onBlur={(e) => handleCellEdit(month, category, 'opex', e.target.value)}
-                                                                    onKeyPress={(e) => {
-                                                                        if (e.key === 'Enter') {
-                                                                            handleCellEdit(month, category, 'opex', e.target.value);
-                                                                        }
+                                                                    onKeyDown={(e) => {
+                                                                        if (e.key === 'Enter') handleCellEdit(month, category, 'opex', e.target.value);
+                                                                        if (e.key === 'Escape') setEditingCell({ month: '', category: '', type: '' });
                                                                     }}
                                                                     style={{ width: '100%', padding: '4px' }}
                                                                 />
@@ -1905,18 +1942,18 @@
 
                                                     return (
                                                         <td key={month}
-                                                            onDoubleClick={() => canEdit && setEditingCell({ month, category, type: 'capex' })}
-                                                            style={{ cursor: canEdit ? 'pointer' : 'default' }}>
+                                                            onDoubleClick={(e) => { e.preventDefault(); if (canEdit) setEditingCell({ month, category, type: 'capex' }); }}
+                                                            style={{ cursor: canEdit ? 'pointer' : 'default', userSelect: 'none' }}>
                                                             {isEditing && canEdit ? (
                                                                 <input
+                                                                    ref={cellInputRef}
                                                                     type="number"
                                                                     defaultValue={value}
-                                                                    autoFocus
+                                                                    onMouseDown={(e) => e.stopPropagation()}
                                                                     onBlur={(e) => handleCellEdit(month, category, 'capex', e.target.value)}
-                                                                    onKeyPress={(e) => {
-                                                                        if (e.key === 'Enter') {
-                                                                            handleCellEdit(month, category, 'capex', e.target.value);
-                                                                        }
+                                                                    onKeyDown={(e) => {
+                                                                        if (e.key === 'Enter') handleCellEdit(month, category, 'capex', e.target.value);
+                                                                        if (e.key === 'Escape') setEditingCell({ month: '', category: '', type: '' });
                                                                     }}
                                                                     style={{ width: '100%', padding: '4px' }}
                                                                 />
