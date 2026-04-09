@@ -507,7 +507,7 @@
 
         // Central API helper — all reads/writes go through Apps Script
         const sheetsAPI = async (action, sheet, data = null) => {
-            if (!SCRIPT_URL || SCRIPT_URL === 'YOUR_SCRIPT_URL_HERE')
+            if (!SCRIPT_URL || SCRIPT_URL === 'APPS_SCRIPT_URL')
                 throw new Error('Script URL not configured. Open bushwalk.html and set SCRIPT_URL at the top of the script.');
             const url = new URL(SCRIPT_URL);
             url.searchParams.set('action', action);
